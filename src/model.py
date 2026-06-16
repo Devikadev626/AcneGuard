@@ -1,19 +1,15 @@
 import torch.nn as nn
-import timm
+from torchvision import models
 
 
-class AcneSeverityModel(nn.Module):
+def get_model(num_classes=4):
 
-    def __init__(self):
+    model = models.resnet18(weights="DEFAULT")
 
-        super().__init__()
+    # Replace final layer
+    model.fc = nn.Linear(
+        model.fc.in_features,
+        num_classes
+    )
 
-        self.model = timm.create_model(
-            "efficientnet_b0",
-            pretrained=True,
-            num_classes=4
-        )
-
-    def forward(self, x):
-
-        return self.model(x)
+    return model

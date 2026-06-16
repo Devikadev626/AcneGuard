@@ -1,172 +1,124 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 
+from torchvision import models
 from torchvision import transforms
+
 from torch.utils.data import DataLoader
 
 from dataset import AcneSeverityDataset
 
+# ==========================================
+# DEVICE
+# ==========================================
 
-# =====================================
-# CONFIG
-# =====================================
-
-IMAGE_DIR = "data/raw/severity_dataset/JPEGImages"
-
-LABEL_FILE = (
-    "data/raw/severity_dataset/NNEW_trainval_1.txt"
+device = torch.device(
+    "cuda" if torch.cuda.is_available() else "cpu"
 )
 
-BATCH_SIZE = 8
-NUM_CLASSES = 4
-EPOCHS = 5
-LEARNING_RATE = 0.001
+print(f"Device: {device}")
 
-
-# =====================================
+# ==========================================
 # TRANSFORMS
-# =====================================
+# ==========================================
 
-transform = transforms.Compose([
+train_transform = transforms.Compose([
     transforms.Resize((224, 224)),
+
+    transforms.RandomHorizontalFlip(),
+
+    transforms.RandomRotation(15),
+
+    transforms.ColorJitter(
+        brightness=0.2,
+        contrast=0.2,
+        saturation=0.2
+    ),
+
     transforms.ToTensor()
 ])
 
-
-# =====================================
+# ==========================================
 # DATASET
-# =====================================
+# ==========================================
 
 dataset = AcneSeverityDataset(
-    image_dir=IMAGE_DIR,
-    label_file=LABEL_FILE,
-    transform=transform
+    image_dir="data/raw/severity_dataset/JPEGImages",
+    label_file="data/raw/severity_dataset/NNEW_trainval_0.txt",
+    transform=train_transform
 )
 
-dataloader = DataLoader(
+print(
+    f"Dataset Size: {len(dataset)}"
+)
+
+# ==========================================
+# DATALOADER
+# ==========================================
+
+train_loader = DataLoader(
     dataset,
-    batch_size=BATCH_SIZE,
+    batch_size=8,
     shuffle=True
 )
 
-print(f"Dataset Size: {len(dataset)}")
-
-
-# =====================================
-# CNN MODEL
-# =====================================
-
-class AcneCNN(nn.Module):
-
-    def __init__(self):
-
-        super().__init__()
-
-        self.features = nn.Sequential(
-
-            nn.Conv2d(
-                3,
-                16,
-                kernel_size=3,
-                padding=1
-            ),
-
-            nn.ReLU(),
-
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(
-                16,
-                32,
-                kernel_size=3,
-                padding=1
-            ),
-
-            nn.ReLU(),
-
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(
-                32,
-                64,
-                kernel_size=3,
-                padding=1
-            ),
-
-            nn.ReLU(),
-
-            nn.MaxPool2d(2)
-        )
-
-        self.classifier = nn.Sequential(
-
-            nn.Flatten(),
-
-            nn.Linear(
-                64 * 28 * 28,
-                128
-            ),
-
-            nn.ReLU(),
-
-            nn.Linear(
-                128,
-                NUM_CLASSES
-            )
-        )
-
-    def forward(self, x):
-
-        x = self.features(x)
-
-        x = self.classifier(x)
-
-        return x
-
-
-# =====================================
-# DEVICE
-# =====================================
-
-device = torch.device(
-    "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
-)
-
-print("Device:", device)
-
-
-# =====================================
+# ==========================================
 # MODEL
-# =====================================
+# ==========================================
 
-model = AcneCNN().to(device)
-
-criterion = nn.CrossEntropyLoss()
-
-optimizer = optim.Adam(
-    model.parameters(),
-    lr=LEARNING_RATE
+model = models.resnet18(
+    weights=models.ResNet18_Weights.DEFAULT
 )
 
+num_features = model.fc.in_features
 
-# =====================================
-# TRAINING LOOP
-# =====================================
+model.fc = nn.Sequential(
+    nn.Dropout(0.5),
+    nn.Linear(
+        num_features,
+        4
+    )
+)
 
-for epoch in range(EPOCHS):
+model = model.to(device)
+
+# ==========================================
+# CLASS WEIGHTS
+# ==========================================
+
+weights = torch.tensor(
+    [1.0, 0.8, 3.5, 4.5],
+    dtype=torch.float
+).to(device)
+
+criterion = nn.CrossEntropyLoss(
+    weight=weights
+)
+
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=0.0001
+)
+
+# ==========================================
+# TRAINING
+# ==========================================
+
+epochs = 20
+
+best_accuracy = 0
+
+for epoch in range(epochs):
 
     model.train()
 
-    running_loss = 0.0
+    running_loss = 0
 
     correct = 0
 
     total = 0
 
-    for images, labels in dataloader:
+    for images, labels in train_loader:
 
         images = images.to(device)
 
@@ -198,29 +150,35 @@ for epoch in range(EPOCHS):
             predicted == labels
         ).sum().item()
 
-    epoch_loss = (
-        running_loss /
-        len(dataloader)
-    )
-
     accuracy = (
         100 * correct / total
     )
 
+    avg_loss = (
+        running_loss /
+        len(train_loader)
+    )
+
     print(
-        f"Epoch [{epoch+1}/{EPOCHS}] "
-        f"Loss: {epoch_loss:.4f} "
+        f"Epoch [{epoch+1}/{epochs}] "
+        f"Loss: {avg_loss:.4f} "
         f"Accuracy: {accuracy:.2f}%"
     )
 
+    if accuracy > best_accuracy:
 
-# =====================================
-# SAVE MODEL
-# =====================================
+        best_accuracy = accuracy
 
-torch.save(
-    model.state_dict(),
-    "acne_severity_model.pth"
+        torch.save(
+            model.state_dict(),
+            "models/best_acne_model.pth"
+        )
+
+        print(
+            "Best Model Saved"
+        )
+
+print("\nTraining Complete")
+print(
+    f"Best Accuracy: {best_accuracy:.2f}%"
 )
-
-print("\nModel Saved Successfully")

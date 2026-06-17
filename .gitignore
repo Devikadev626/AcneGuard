@@ -4,12 +4,12 @@ venv/
 *.pyc
 
 uploads/
+
+models/*.pth
+
+reports/*.pdf
+reports/history.csv
+
 temp_image.jpg
 
 .streamlit/
-
-reports/history.csv
-
-.ipynb_checkpoints/
-
-.DS_Store

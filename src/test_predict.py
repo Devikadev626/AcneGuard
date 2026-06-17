@@ -1,7 +1,7 @@
 from predict import predict_image
 
 severity, confidence = predict_image(
-    "test.jpg"
+    "test_images/acne_sample.jpg"
 )
 
 print(

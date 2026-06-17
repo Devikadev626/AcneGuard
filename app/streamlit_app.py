@@ -1,4 +1,3 @@
-
 import sys
 import os
 
@@ -14,11 +13,16 @@ sys.path.append(
 import streamlit as st
 import pandas as pd
 
-from datetime import datetime
 from PIL import Image
 
-from src.predict import predict_image
+from src.predict import predict_image, model
+from src.gradcam import generate_gradcam_overlay
 from src.report_generator import generate_report
+
+from database.database import (
+    create_prediction,
+    list_predictions
+)
 
 
 # ===================================
@@ -80,6 +84,11 @@ if uploaded_file:
         exist_ok=True
     )
 
+    os.makedirs(
+        "gradcam/temp",
+        exist_ok=True
+    )
+
     image_path = os.path.join(
         "uploads",
         uploaded_file.name
@@ -90,7 +99,7 @@ if uploaded_file:
     )
 
     # ===================================
-    # PREDICTION
+    # MODEL PREDICTION
     # ===================================
 
     severity, confidence = predict_image(
@@ -98,63 +107,58 @@ if uploaded_file:
     )
 
     # ===================================
-    # GENERATE PDF REPORT
+    # GENERATE GRAD-CAM
+    # ===================================
+
+    gradcam_path = os.path.join(
+        "gradcam",
+        "temp",
+        f"gradcam_{uploaded_file.name}"
+    )
+
+    try:
+
+        generate_gradcam_overlay(
+            model=model,
+            target_layer=model.layer4,
+            image_path=image_path,
+            output_path=gradcam_path
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Grad-CAM generation failed: {e}"
+        )
+
+        gradcam_path = None
+
+    # ===================================
+    # PDF REPORT
     # ===================================
 
     pdf_path = generate_report(
-        severity=severity,
-        confidence=confidence
-    )
-
+    severity=severity,
+    confidence=confidence,
+    gradcam_path=gradcam_path
+)
     # ===================================
-    # SAVE HISTORY
+    # SAVE TO SQLITE
     # ===================================
 
-    os.makedirs(
-        "reports",
-        exist_ok=True
-    )
+    try:
 
-    history_file = "reports/history.csv"
-
-    if not os.path.exists(
-        history_file
-    ):
-
-        pd.DataFrame(
-            columns=[
-                "Timestamp",
-                "Severity",
-                "Confidence"
-            ]
-        ).to_csv(
-            history_file,
-            index=False
+        create_prediction(
+            image_name=uploaded_file.name,
+            severity=severity,
+            confidence=confidence
         )
 
-    new_record = pd.DataFrame({
+    except Exception as e:
 
-        "Timestamp": [
-            datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-        ],
-
-        "Severity": [
-            severity
-        ],
-
-        "Confidence": [
-            confidence
-        ]
-    })
-
-    new_record.to_csv(
-        history_file,
-        mode="a",
-        header=False,
-        index=False
-    )
+        st.error(
+            f"Failed to save prediction record: {e}"
+        )
 
     st.markdown("---")
 
@@ -176,6 +180,17 @@ if uploaded_file:
         st.metric(
             "Confidence",
             f"{confidence}%"
+        )
+
+    # ===================================
+    # LOW CONFIDENCE WARNING
+    # ===================================
+
+    if confidence < 75:
+
+        st.warning(
+            "⚠️ Low prediction confidence. "
+            "Clinical review recommended."
         )
 
     # ===================================
@@ -239,7 +254,45 @@ if uploaded_file:
         )
 
     # ===================================
-    # DOWNLOAD PDF REPORT
+    # GRAD-CAM DISPLAY
+    # ===================================
+
+    if gradcam_path and os.path.exists(
+        gradcam_path
+    ):
+
+        st.markdown("---")
+
+        st.subheader(
+            "AI Attention Heatmap (Grad-CAM)"
+        )
+
+        show_heatmap = st.checkbox(
+            "Show AI Attention Heatmap"
+        )
+
+        if show_heatmap:
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.image(
+                    image,
+                    caption="Original Image",
+                    use_container_width=True
+                )
+
+            with col2:
+
+                st.image(
+                    gradcam_path,
+                    caption="Grad-CAM Overlay",
+                    use_container_width=True
+                )
+
+    # ===================================
+    # DOWNLOAD REPORT
     # ===================================
 
     st.markdown("---")
@@ -271,21 +324,37 @@ st.subheader(
     "Prediction History"
 )
 
-history_file = "reports/history.csv"
-
 try:
 
-    if os.path.exists(
-        history_file
-    ):
+    predictions = list_predictions(
+        limit=10
+    )
 
-        history = pd.read_csv(
-            history_file,
-            encoding="utf-8-sig"
+    if predictions:
+
+        history_data = []
+
+        for pred in predictions:
+
+            history_data.append({
+
+                "Timestamp":
+                pred["prediction_date"],
+
+                "Severity":
+                pred["severity"],
+
+                "Confidence":
+                pred["confidence"]
+
+            })
+
+        history = pd.DataFrame(
+            history_data
         )
 
         st.dataframe(
-            history.tail(10),
+            history,
             use_container_width=True
         )
 
@@ -298,5 +367,5 @@ try:
 except Exception as e:
 
     st.warning(
-        f"Could not load history file: {e}"
+        f"Could not load history: {e}"
     )

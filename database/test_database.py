@@ -17,6 +17,7 @@ from database.database import (
     create_prediction,
     list_predictions,
     create_report,
+    get_analytics_data,
     DB_PATH
 )
 
@@ -76,6 +77,13 @@ def test_database_lifecycle():
     assert len(predictions) == 2, "Should return 2 prediction entries."
     # The newest should be first (LIFO order by date)
     assert predictions[0]['id'] == 2, "First element in predictions list should be ID 2 (newest)."
+
+    # Test get_analytics_data()
+    print("Testing get_analytics_data()...")
+    analytics_data = get_analytics_data()
+    assert len(analytics_data) == 2, "Should return all (2) prediction entries for analytics."
+    assert analytics_data[0]['id'] == 2, "First element in analytics data should be ID 2 (newest)."
+    print("get_analytics_data() verified successfully.")
 
     # 7. Create report linked to prediction
     print("Creating report mapping...")
